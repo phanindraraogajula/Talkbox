@@ -10,15 +10,16 @@ import { FriendsPage } from "./components/FriendsPage";
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
-  const [activeView, setActiveView] = useState("home");
+  const [activeView, setActiveView] = useState<"home" | "globalchat" | "friends">("home");
   const [username, setUsername] = useState("");
 
+  // Not logged in: show login / signup
   if (!isLoggedIn) {
     if (showSignUp) {
       return (
         <SignUpPage
           onSignUp={(name) => {
-            setUsername(name);
+            setUsername(name);      // this becomes userId for chat/friends APIs
             setIsLoggedIn(true);
             setShowSignUp(false);
           }}
@@ -26,10 +27,11 @@ export default function App() {
         />
       );
     }
+
     return (
       <LoginPage
         onLogin={(name) => {
-          setUsername(name);
+          setUsername(name);        // this becomes userId for chat/friends APIs
           setIsLoggedIn(true);
         }}
         onSignUp={() => setShowSignUp(true)}
@@ -37,16 +39,23 @@ export default function App() {
     );
   }
 
+  // Logged in: main app shell
   return (
     <div className="h-screen flex bg-white">
       <AppSidebar activeView={activeView} onViewChange={setActiveView} />
-      
+
       <div className="flex-1 flex flex-col">
         <TopBar onLogout={() => setIsLoggedIn(false)} />
-        
+
         {activeView === "home" && <LandingPage username={username} />}
-        {activeView === "globalchat" && <GlobalChatPanel />}
-        {activeView === "friends" && <FriendsPage />}
+
+        {activeView === "globalchat" && (
+          <GlobalChatPanel username={username} />
+        )}
+
+        {activeView === "friends" && (
+          <FriendsPage username={username} />
+        )}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { motion } from "motion/react";
+import { backend } from "../../../constants";
 
 interface LoginPageProps {
   onLogin: (username: string) => void;
@@ -13,10 +14,52 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isHovered, setIsHovered] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin(username);
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const res = await fetch(`http://${backend.IP}:${backend.PORT}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          "userId": username,
+          "password": password,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        // adapt these keys based on your backend response
+        const msg =
+          (data.detail as string) ||
+          (data.message as string) ||
+          "Login failed. Please check your credentials.";
+        setError(msg);
+        return;
+      }
+
+      // if backend returns token/user info, you can store it here
+      if (data.token) {
+        localStorage.setItem("authToken", data.token);
+      }
+
+      // prefer username returned from backend if available
+      const displayName = (data.username as string) || username;
+      onLogin(displayName);
+    } catch (err) {
+      console.error(err);
+      setError("Unable to reach server. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -137,6 +180,16 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
             />
           </motion.div>
 
+          {error && (
+            <motion.p
+              className="text-sm text-red-600"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              {error}
+            </motion.p>
+          )}
+
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -146,8 +199,9 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
               <Button
                 type="submit"
                 className="w-full bg-gradient-to-r from-[#6264A7] to-[#7B7DB8] hover:from-[#5558A0] hover:to-[#6A6CA8] h-11 shadow-lg"
+                disabled={isLoading}
               >
-                Sign In
+                {isLoading ? "Signing in..." : "Sign In"}
               </Button>
             </motion.div>
           </motion.div>

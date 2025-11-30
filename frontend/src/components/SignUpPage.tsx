@@ -3,6 +3,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { motion } from "motion/react";
+import { backend } from "../../../constants";
 
 interface SignUpPageProps {
   onSignUp: (username: string) => void;
@@ -10,47 +11,79 @@ interface SignUpPageProps {
 }
 
 export function SignUpPage({ onSignUp, onBackToLogin }: SignUpPageProps) {
-  const [username, setUsername] = useState("");
+  const [userId, setUserId] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [isHovered, setIsHovered] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+
     if (password !== confirmPassword) {
-      alert("Passwords do not match!");
+      setError("Passwords do not match.");
       return;
     }
-    onSignUp(username);
+
+    setIsLoading(true);
+
+    try {
+      const body = {
+        userId,
+        firstName,
+        lastName,
+        password,
+      };
+
+      console.log("Sending:", body);
+
+      const res = await fetch(`http://${backend.IP}:${backend.PORT}/auth/register/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const msg =
+          (data.detail as string) ||
+          (data.message as string) ||
+          "Registration failed.";
+        setError(msg);
+        return;
+      }
+
+      // Auto login if backend returns useful data
+      onSignUp(userId);
+    } catch (err) {
+      console.error(err);
+      setError("Unable to reach server.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="h-screen flex items-center justify-center bg-gradient-to-br from-[#6264A7] via-[#7B7DB8] to-[#8B8CC7] relative overflow-hidden">
-      {/* Animated Background Elements */}
+
+      {/* Background Animation */}
       <motion.div
         className="absolute top-20 left-20 w-64 h-64 bg-white/10 rounded-full blur-3xl"
-        animate={{
-          scale: [1, 1.2, 1],
-          opacity: [0.3, 0.5, 0.3],
-        }}
-        transition={{
-          duration: 4,
-          repeat: Infinity,
-          ease: "easeInOut",
-        }}
+        animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }}
+        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       />
       <motion.div
         className="absolute bottom-20 right-20 w-80 h-80 bg-white/10 rounded-full blur-3xl"
-        animate={{
-          scale: [1, 1.3, 1],
-          opacity: [0.3, 0.5, 0.3],
-        }}
-        transition={{
-          duration: 5,
-          repeat: Infinity,
-          ease: "easeInOut",
-          delay: 1,
-        }}
+        animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0.5, 0.3] }}
+        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
       />
 
       <motion.div
@@ -77,131 +110,110 @@ export function SignUpPage({ onSignUp, onBackToLogin }: SignUpPageProps) {
               <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" />
             </motion.svg>
           </motion.div>
-          <motion.div
-            className="mb-4"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-          >
-            <h1 className="text-transparent bg-clip-text bg-gradient-to-r from-[#6264A7] to-[#8B8CC7] mb-2">
-              Talkbox
-            </h1>
-          </motion.div>
-          <motion.h2
-            className="text-gray-900 mb-2"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            Create Account
-          </motion.h2>
-          <motion.p
-            className="text-gray-600"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4 }}
-          >
-            Sign up to get started with Talkbox
-          </motion.p>
+
+          <h1 className="text-transparent bg-clip-text bg-gradient-to-r from-[#6264A7] to-[#8B8CC7] mb-2">
+            Talkbox
+          </h1>
+          <h2 className="text-gray-900 mb-2">Create Account</h2>
+          <p className="text-gray-600">Fill your details to join Talkbox</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          <motion.div
-            className="space-y-2"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.5 }}
-          >
-            <Label htmlFor="username">Username</Label>
+
+          {/* UserId */}
+          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
+            <Label htmlFor="userId">User ID</Label>
             <Input
-              id="username"
+              id="userId"
               type="text"
-              placeholder="Choose a username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              placeholder="karthik01"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
               required
-              className="h-11 transition-all duration-200 focus:ring-2 focus:ring-[#6264A7]/20"
+              className="h-11"
             />
           </motion.div>
 
-          <motion.div
-            className="space-y-2"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.6 }}
-          >
+          {/* First Name */}
+          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
+            <Label htmlFor="firstName">First Name</Label>
+            <Input
+              id="firstName"
+              type="text"
+              placeholder="Karthik"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              required
+              className="h-11"
+            />
+          </motion.div>
+
+          {/* Last Name */}
+          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
+            <Label htmlFor="lastName">Last Name</Label>
+            <Input
+              id="lastName"
+              type="text"
+              placeholder="Mangineni"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              required
+              className="h-11"
+            />
+          </motion.div>
+
+          {/* Password */}
+          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
             <Label htmlFor="password">Password</Label>
             <Input
               id="password"
               type="password"
-              placeholder="Create a password"
+              placeholder="Create password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="h-11 transition-all duration-200 focus:ring-2 focus:ring-[#6264A7]/20"
+              className="h-11"
             />
           </motion.div>
 
-          <motion.div
-            className="space-y-2"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.7 }}
-          >
+          {/* Confirm Password */}
+          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
             <Label htmlFor="confirmPassword">Confirm Password</Label>
             <Input
               id="confirmPassword"
               type="password"
-              placeholder="Confirm your password"
+              placeholder="Re-enter password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
-              className="h-11 transition-all duration-200 focus:ring-2 focus:ring-[#6264A7]/20"
+              className="h-11"
             />
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.8 }}
-          >
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-              <Button
-                type="submit"
-                className="w-full bg-gradient-to-r from-[#6264A7] to-[#7B7DB8] hover:from-[#5558A0] hover:to-[#6A6CA8] h-11 shadow-lg"
-              >
-                Sign Up
-              </Button>
-            </motion.div>
+          {error && <p className="text-red-600 text-sm">{error}</p>}
+
+          {/* Submit Button */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+            <Button
+              type="submit"
+              className="w-full bg-gradient-to-r from-[#6264A7] to-[#7B7DB8] h-11 shadow-lg"
+              disabled={isLoading}
+            >
+              {isLoading ? "Creating Account..." : "Sign Up"}
+            </Button>
           </motion.div>
         </form>
 
-        <motion.div
-          className="mt-6 text-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.9 }}
-        >
+        {/* Back to Login */}
+        <div className="mt-6 text-center">
           <span className="text-gray-600">Already have an account? </span>
           <button
             onClick={onBackToLogin}
-            className="text-[#6264A7] hover:text-[#5558A0] transition-colors duration-200 hover:underline"
+            className="text-[#6264A7] hover:underline"
           >
             Sign In
           </button>
-        </motion.div>
-
-        {/* Decorative Elements */}
-        <motion.div
-          className="absolute -top-4 -right-4 w-24 h-24 bg-gradient-to-br from-[#6264A7]/20 to-transparent rounded-full blur-2xl"
-          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.8, 0.5] }}
-          transition={{ duration: 3, repeat: Infinity }}
-        />
-        <motion.div
-          className="absolute -bottom-4 -left-4 w-24 h-24 bg-gradient-to-tr from-[#8B8CC7]/20 to-transparent rounded-full blur-2xl"
-          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.8, 0.5] }}
-          transition={{ duration: 3, repeat: Infinity, delay: 1.5 }}
-        />
+        </div>
       </motion.div>
     </div>
   );

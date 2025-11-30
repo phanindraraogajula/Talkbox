@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { UserPlus, Search, MessageCircle, X, Users } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Avatar, AvatarFallback } from "./ui/avatar";
-import { Card } from "./ui/card";
+import { Badge } from "./ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -12,26 +12,28 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Label } from "./ui/label";
-import { Badge } from "./ui/badge";
 import { GroupChatPanel } from "./GroupChatPanel";
+import { backend } from "../../../constants";
+import { io } from "socket.io-client";
 
-const initialFriends = [
-  { id: 1, name: "Sarah Johnson", status: "Online", color: "bg-blue-500", initials: "SJ" },
-  { id: 2, name: "Michael Chen", status: "Away", color: "bg-green-500", initials: "MC" },
-  { id: 3, name: "Emily Rodriguez", status: "Online", color: "bg-orange-500", initials: "ER" },
-  { id: 4, name: "David Kim", status: "Offline", color: "bg-purple-500", initials: "DK" },
-  { id: 5, name: "Lisa Anderson", status: "Online", color: "bg-pink-500", initials: "LA" },
-  { id: 6, name: "James Wilson", status: "Away", color: "bg-indigo-500", initials: "JW" },
-];
+const API_BASE = `http://${backend.IP}:${backend.PORT}`;
 
-const availableUsers = [
-  { id: 7, name: "Robert Taylor", color: "bg-teal-500", initials: "RT" },
-  { id: 8, name: "Jennifer Lee", color: "bg-cyan-500", initials: "JL" },
-  { id: 9, name: "Thomas Brown", color: "bg-amber-500", initials: "TB" },
-  { id: 10, name: "Amanda White", color: "bg-rose-500", initials: "AW" },
-  { id: 11, name: "Christopher Davis", color: "bg-violet-500", initials: "CD" },
-  { id: 12, name: "Michelle Martin", color: "bg-lime-500", initials: "MM" },
-];
+interface Friend {
+  id: number;
+  username: string;        // backend userId (e.g. "karthik01")
+  displayName: string;     // what we show in UI
+  status: "Online" | "Away" | "Offline";
+  color: string;
+  initials: string;
+}
+
+interface AvailableUser {
+  id: number;
+  username: string;
+  displayName: string;
+  color: string;
+  initials: string;
+}
 
 interface Group {
   id: number;
@@ -40,8 +42,53 @@ interface Group {
   color: string;
 }
 
-export function FriendsPage() {
-  const [friends, setFriends] = useState(initialFriends);
+interface FriendsPageProps {
+  username: string; // logged-in userId
+}
+
+// ---- helpers ----
+
+function usernameToId(username: string): number {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = (hash * 31 + username.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+const COLOR_CLASSES = [
+  "bg-blue-500",
+  "bg-green-500",
+  "bg-orange-500",
+  "bg-purple-500",
+  "bg-pink-500",
+  "bg-indigo-500",
+  "bg-teal-500",
+  "bg-cyan-500",
+  "bg-amber-500",
+  "bg-rose-500",
+  "bg-violet-500",
+  "bg-lime-500",
+];
+
+function colorFromUsername(username: string): string {
+  const id = usernameToId(username);
+  return COLOR_CLASSES[id % COLOR_CLASSES.length];
+}
+
+function initialsFromUsername(username: string): string {
+  if (!username) return "??";
+  if (username.includes(" ")) {
+    const parts = username.split(" ").filter(Boolean);
+    return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+  }
+  return username.slice(0, 2).toUpperCase();
+}
+
+// ---------------- FriendsPage ----------------
+
+export function FriendsPage({ username }: FriendsPageProps) {
+  const [friends, setFriends] = useState<Friend[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -52,32 +99,173 @@ export function FriendsPage() {
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<number[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
 
-  const filteredFriends = friends.filter(friend =>
-    friend.name.toLowerCase().includes(searchQuery.toLowerCase())
+  // realtime online users from backend
+  const [onlineUsernames, setOnlineUsernames] = useState<string[]>([]);
+  const [socketConnected, setSocketConnected] = useState(false);
+
+  // ---- socket.io: track active users in real time ----
+  useEffect(() => {
+    const socket = io(API_BASE, { transports: ["websocket"] });
+
+    socket.on("connect", () => {
+      setSocketConnected(true);
+      socket.emit("registerUser", username);
+    });
+
+    socket.on("activeUsers", (users: string[]) => {
+      setOnlineUsernames(users || []);
+    });
+
+    socket.on("disconnect", () => {
+      setSocketConnected(false);
+    });
+
+    // initial fetch as fallback
+    const fetchOnline = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/chat/online-users`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.onlineUsers)) {
+          setOnlineUsernames(data.onlineUsers);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    fetchOnline();
+
+    return () => {
+      socket.removeAllListeners();
+      socket.disconnect();
+    };
+  }, [username]);
+
+  // ---- fetch friend list from backend ----
+  useEffect(() => {
+    const fetchFriends = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/friend/list?userId=${encodeURIComponent(username)}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!Array.isArray(data.friends)) return;
+
+        const mapped: Friend[] = data.friends.map((friendUsername: string) => {
+          const id = usernameToId(friendUsername);
+          return {
+            id,
+            username: friendUsername,
+            displayName: friendUsername, // if you later get full name, put it here
+            status: "Offline",
+            color: colorFromUsername(friendUsername),
+            initials: initialsFromUsername(friendUsername),
+          };
+        });
+
+        setFriends(mapped);
+      } catch (err) {
+        console.error("Failed to load friends", err);
+      }
+    };
+
+    fetchFriends();
+  }, [username]);
+
+  // update friend statuses whenever online list changes
+  useEffect(() => {
+    setFriends((prev) =>
+      prev.map((f) => ({
+        ...f,
+        status: onlineUsernames.includes(f.username) ? "Online" : "Offline",
+      }))
+    );
+  }, [onlineUsernames]);
+
+  // ---- available users for Add dialog (online but not already friends, and not you) ----
+  const availableUsers: AvailableUser[] = useMemo(() => {
+    const friendUsernames = new Set(friends.map((f) => f.username));
+
+    return onlineUsernames
+      .filter((u) => u && u !== username)
+      .filter((u) => !friendUsernames.has(u))
+      .map((u) => {
+        const id = usernameToId(u);
+        return {
+          id,
+          username: u,
+          displayName: u,
+          color: colorFromUsername(u),
+          initials: initialsFromUsername(u),
+        };
+      });
+  }, [onlineUsernames, friends, username]);
+
+  const filteredFriends = friends.filter((friend) =>
+    friend.displayName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredGroups = groups.filter(group =>
+  const filteredGroups = groups.filter((group) =>
     group.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredAvailableUsers = availableUsers.filter(user =>
-    user.name.toLowerCase().includes(addSearchQuery.toLowerCase()) &&
-    !friends.some(friend => friend.id === user.id)
+  const filteredAvailableUsers = availableUsers.filter((user) => {
+    const q = addSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      user.displayName.toLowerCase().includes(q) ||
+      user.username.toLowerCase().includes(q)
+    );
+  });
+
+  const filteredFriendsForGroup = friends.filter((friend) =>
+    friend.displayName.toLowerCase().includes(groupSearchQuery.toLowerCase())
   );
 
-  const filteredFriendsForGroup = friends.filter(friend =>
-    friend.name.toLowerCase().includes(groupSearchQuery.toLowerCase())
-  );
+  // ---- add friend via backend ----
+  const handleAddFriend = async (user: AvailableUser) => {
+    try {
+      const res = await fetch(`${API_BASE}/friend/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: username,
+          friendId: user.username,
+        }),
+      });
 
-  const handleAddFriend = (user: typeof availableUsers[0]) => {
-    setFriends([...friends, { ...user, status: "Online" }]);
-    setAddSearchQuery("");
+      if (!res.ok) {
+        console.error("Failed to add friend", await res.text());
+        return;
+      }
+
+      // only add to UI if not already present
+      setFriends((prev) => {
+        if (prev.some((f) => f.username === user.username)) {
+          return prev;
+        }
+        const newFriend: Friend = {
+          id: user.id,
+          username: user.username,
+          displayName: user.displayName,
+          status: "Online", // they are in online list
+          color: user.color,
+          initials: user.initials,
+        };
+        return [...prev, newFriend];
+      });
+
+      setAddSearchQuery("");
+    } catch (err) {
+      console.error("Error adding friend", err);
+    }
   };
 
   const toggleGroupMember = (friendId: number) => {
-    setSelectedGroupMembers(prev =>
+    setSelectedGroupMembers((prev) =>
       prev.includes(friendId)
-        ? prev.filter(id => id !== friendId)
+        ? prev.filter((id) => id !== friendId)
         : [...prev, friendId]
     );
   };
@@ -88,9 +276,9 @@ export function FriendsPage() {
         id: Date.now(),
         name: groupName,
         members: selectedGroupMembers,
-        color: "bg-[#6264A7]"
+        color: "bg-[#6264A7]",
       };
-      setGroups([...groups, newGroup]);
+      setGroups((prev) => [...prev, newGroup]);
       setShowGroupDialog(false);
       setGroupName("");
       setSelectedGroupMembers([]);
@@ -126,7 +314,7 @@ export function FriendsPage() {
               </Button>
             </div>
           </div>
-          
+
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
@@ -137,6 +325,12 @@ export function FriendsPage() {
               className="pl-9 h-9 bg-[#F3F2F1]"
             />
           </div>
+
+          {!socketConnected && (
+            <p className="mt-2 text-xs text-red-500">
+              Not connected to realtime server – showing last known state.
+            </p>
+          )}
         </div>
 
         <div className="flex-1 overflow-auto">
@@ -144,19 +338,25 @@ export function FriendsPage() {
           {filteredGroups.length > 0 && (
             <div className="border-b border-gray-200">
               <div className="px-3 py-2 bg-gray-50">
-                <span className="text-xs text-gray-500 uppercase tracking-wide">Groups</span>
+                <span className="text-xs text-gray-500 uppercase tracking-wide">
+                  Groups
+                </span>
               </div>
               {filteredGroups.map((group) => (
                 <div
                   key={group.id}
                   onClick={() => setSelectedGroup(group)}
                   className={`flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 ${
-                    selectedGroup?.id === group.id ? 'bg-[#6264A7]/10 border-l-4 border-l-[#6264A7]' : ''
+                    selectedGroup?.id === group.id
+                      ? "bg-[#6264A7]/10 border-l-4 border-l-[#6264A7]"
+                      : ""
                   }`}
                 >
                   <div className="relative">
                     <Avatar className={`h-10 w-10 ${group.color}`}>
-                      <AvatarFallback className={`${group.color} text-white text-xs`}>
+                      <AvatarFallback
+                        className={`${group.color} text-white text-xs`}
+                      >
                         <Users className="h-5 w-5" />
                       </AvatarFallback>
                     </Avatar>
@@ -164,11 +364,12 @@ export function FriendsPage() {
                       {group.members.length}
                     </div>
                   </div>
-                  
+
                   <div className="flex-1 min-w-0">
                     <h3 className="text-gray-900 truncate">{group.name}</h3>
                     <p className="text-gray-500 text-xs truncate">
-                      {group.members.length} member{group.members.length !== 1 ? 's' : ''}
+                      {group.members.length} member
+                      {group.members.length !== 1 ? "s" : ""}
                     </p>
                   </div>
                 </div>
@@ -181,7 +382,9 @@ export function FriendsPage() {
             <>
               {filteredGroups.length > 0 && (
                 <div className="px-3 py-2 bg-gray-50">
-                  <span className="text-xs text-gray-500 uppercase tracking-wide">Direct Messages</span>
+                  <span className="text-xs text-gray-500 uppercase tracking-wide">
+                    Direct Messages
+                  </span>
                 </div>
               )}
               {filteredFriends.map((friend) => (
@@ -191,7 +394,9 @@ export function FriendsPage() {
                 >
                   <div className="relative">
                     <Avatar className={`h-10 w-10 ${friend.color}`}>
-                      <AvatarFallback className={`${friend.color} text-white text-xs`}>
+                      <AvatarFallback
+                        className={`${friend.color} text-white text-xs`}
+                      >
                         {friend.initials}
                       </AvatarFallback>
                     </Avatar>
@@ -205,9 +410,11 @@ export function FriendsPage() {
                       }`}
                     />
                   </div>
-                  
+
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-gray-900 truncate">{friend.name}</h3>
+                    <h3 className="text-gray-900 truncate">
+                      {friend.displayName}
+                    </h3>
                     <p className="text-gray-500 truncate">{friend.status}</p>
                   </div>
                 </div>
@@ -238,7 +445,9 @@ export function FriendsPage() {
               <MessageCircle className="h-10 w-10 text-gray-400" />
             </div>
             <h2 className="text-gray-900 mb-2">Select a conversation</h2>
-            <p className="text-gray-500">Choose a friend from the list to start chatting</p>
+            <p className="text-gray-500">
+              Choose a friend from the list to start chatting
+            </p>
           </div>
         )}
       </div>
@@ -249,16 +458,17 @@ export function FriendsPage() {
           <DialogHeader>
             <DialogTitle>Add Friends</DialogTitle>
             <DialogDescription>
-              Search for users and add them to your friends list
+              Shows users who are currently online. Search and add them to your
+              friends list.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
                 type="text"
-                placeholder="Search users..."
+                placeholder="Search by name or username..."
                 value={addSearchQuery}
                 onChange={(e) => setAddSearchQuery(e.target.value)}
                 className="pl-9"
@@ -266,9 +476,13 @@ export function FriendsPage() {
             </div>
 
             <div className="max-h-[300px] overflow-auto space-y-2">
-              {filteredAvailableUsers.length === 0 ? (
+              {availableUsers.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
-                  {addSearchQuery ? "No users found" : "Start typing to search for users"}
+                  No online users available to add
+                </div>
+              ) : filteredAvailableUsers.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No users match this search
                 </div>
               ) : (
                 filteredAvailableUsers.map((user) => (
@@ -281,9 +495,14 @@ export function FriendsPage() {
                         {user.initials}
                       </AvatarFallback>
                     </Avatar>
-                    
+
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-gray-900 truncate">{user.name}</h3>
+                      <h3 className="text-gray-900 truncate">
+                        {user.displayName}
+                      </h3>
+                      <p className="text-gray-500 text-xs truncate">
+                        @{user.username}
+                      </p>
                     </div>
 
                     <Button
@@ -311,7 +530,7 @@ export function FriendsPage() {
               Create a new group and add friends to it
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="groupName">Group Name</Label>
@@ -328,15 +547,15 @@ export function FriendsPage() {
               <div className="space-y-2">
                 <Label>Selected Members ({selectedGroupMembers.length})</Label>
                 <div className="flex flex-wrap gap-2">
-                  {selectedGroupMembers.map(memberId => {
-                    const member = friends.find(f => f.id === memberId);
+                  {selectedGroupMembers.map((memberId) => {
+                    const member = friends.find((f) => f.id === memberId);
                     return member ? (
                       <Badge
                         key={memberId}
                         variant="secondary"
                         className="pl-2 pr-1 py-1 gap-1"
                       >
-                        <span>{member.name}</span>
+                        <span>{member.displayName}</span>
                         <button
                           onClick={() => toggleGroupMember(memberId)}
                           className="ml-1 hover:bg-gray-300 rounded-full p-0.5"
@@ -376,8 +595,8 @@ export function FriendsPage() {
                     onClick={() => toggleGroupMember(friend.id)}
                     className={`flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg border cursor-pointer transition-colors ${
                       selectedGroupMembers.includes(friend.id)
-                        ? 'border-[#6264A7] bg-[#6264A7]/5'
-                        : 'border-gray-100'
+                        ? "border-[#6264A7] bg-[#6264A7]/5"
+                        : "border-gray-100"
                     }`}
                   >
                     <Avatar className={`h-10 w-10 ${friend.color}`}>
@@ -385,16 +604,26 @@ export function FriendsPage() {
                         {friend.initials}
                       </AvatarFallback>
                     </Avatar>
-                    
+
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-gray-900 truncate">{friend.name}</h3>
+                      <h3 className="text-gray-900 truncate">
+                        {friend.displayName}
+                      </h3>
                       <p className="text-gray-500 text-xs">{friend.status}</p>
                     </div>
 
                     {selectedGroupMembers.includes(friend.id) && (
                       <div className="w-5 h-5 rounded-full bg-[#6264A7] flex items-center justify-center">
-                        <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        <svg
+                          className="w-3 h-3 text-white"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
                         </svg>
                       </div>
                     )}
