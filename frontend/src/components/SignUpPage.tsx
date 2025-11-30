@@ -4,19 +4,24 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { motion } from "motion/react";
 
-interface LoginPageProps {
-  onLogin: (username: string) => void;
-  onSignUp: () => void;
+interface SignUpPageProps {
+  onSignUp: (username: string) => void;
+  onBackToLogin: () => void;
 }
 
-export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
+export function SignUpPage({ onSignUp, onBackToLogin }: SignUpPageProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [isHovered, setIsHovered] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin(username);
+    if (password !== confirmPassword) {
+      alert("Passwords do not match!");
+      return;
+    }
+    onSignUp(username);
   };
 
   return (
@@ -88,7 +93,7 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
           >
-            Welcome Back
+            Create Account
           </motion.h2>
           <motion.p
             className="text-gray-600"
@@ -96,7 +101,7 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
           >
-            Sign in to continue to your workspace
+            Sign up to get started with Talkbox
           </motion.p>
         </div>
 
@@ -111,7 +116,7 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
             <Input
               id="username"
               type="text"
-              placeholder="Enter your username"
+              placeholder="Choose a username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
@@ -129,7 +134,7 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
             <Input
               id="password"
               type="password"
-              placeholder="Enter your password"
+              placeholder="Create a password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -138,16 +143,34 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
           </motion.div>
 
           <motion.div
+            className="space-y-2"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.7 }}
+          >
+            <Label htmlFor="confirmPassword">Confirm Password</Label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              placeholder="Confirm your password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              className="h-11 transition-all duration-200 focus:ring-2 focus:ring-[#6264A7]/20"
+            />
+          </motion.div>
+
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7 }}
+            transition={{ delay: 0.8 }}
           >
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
               <Button
                 type="submit"
                 className="w-full bg-gradient-to-r from-[#6264A7] to-[#7B7DB8] hover:from-[#5558A0] hover:to-[#6A6CA8] h-11 shadow-lg"
               >
-                Sign In
+                Sign Up
               </Button>
             </motion.div>
           </motion.div>
@@ -157,30 +180,28 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
           className="mt-6 text-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.8 }}
-        >
-          <a
-            href="#"
-            className="text-[#6264A7] hover:text-[#5558A0] transition-colors duration-200 hover:underline"
-          >
-            Forgot password?
-          </a>
-        </motion.div>
-
-        <motion.div
-          className="mt-4 text-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
           transition={{ delay: 0.9 }}
         >
-          <span className="text-gray-600">Don't have an account? </span>
+          <span className="text-gray-600">Already have an account? </span>
           <button
-            onClick={onSignUp}
+            onClick={onBackToLogin}
             className="text-[#6264A7] hover:text-[#5558A0] transition-colors duration-200 hover:underline"
           >
-            Sign Up
+            Sign In
           </button>
         </motion.div>
+
+        {/* Decorative Elements */}
+        <motion.div
+          className="absolute -top-4 -right-4 w-24 h-24 bg-gradient-to-br from-[#6264A7]/20 to-transparent rounded-full blur-2xl"
+          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.8, 0.5] }}
+          transition={{ duration: 3, repeat: Infinity }}
+        />
+        <motion.div
+          className="absolute -bottom-4 -left-4 w-24 h-24 bg-gradient-to-tr from-[#8B8CC7]/20 to-transparent rounded-full blur-2xl"
+          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.8, 0.5] }}
+          transition={{ duration: 3, repeat: Infinity, delay: 1.5 }}
+        />
       </motion.div>
     </div>
   );

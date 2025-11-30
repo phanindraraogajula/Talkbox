@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Hash, Pin, Bell, Users, MoreVertical, Send, Paperclip, Smile, Bold, Italic, Underline, Link, List } from "lucide-react";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback } from "./ui/avatar";
@@ -20,7 +20,7 @@ const initialMessages: Message[] = [
     id: "1",
     author: "Sarah Johnson",
     time: "10:30 AM",
-    message: "Welcome to the Global Chat! Feel free to share updates, ask questions, or collaborate with the team.",
+    message: "Hey everyone! Welcome to the group.",
     avatarColor: "bg-blue-500",
     initials: "SJ"
   },
@@ -28,58 +28,28 @@ const initialMessages: Message[] = [
     id: "2",
     author: "Michael Chen",
     time: "10:45 AM",
-    message: "Thanks Sarah! Excited to be part of this workspace. Looking forward to collaborating with everyone.",
+    message: "Thanks for adding me! Excited to chat with you all.",
     avatarColor: "bg-green-500",
     initials: "MC"
-  },
-  {
-    id: "3",
-    author: "Emily Rodriguez",
-    time: "11:15 AM",
-    message: "Has anyone reviewed the latest project documentation? I have some suggestions for improvements.",
-    avatarColor: "bg-orange-500",
-    initials: "ER"
-  },
-  {
-    id: "4",
-    author: "David Kim",
-    time: "11:30 AM",
-    message: "I've just uploaded the new designs to the shared folder. Please take a look and let me know your thoughts!",
-    avatarColor: "bg-purple-500",
-    initials: "DK"
-  },
-  {
-    id: "5",
-    author: "Lisa Anderson",
-    time: "12:00 PM",
-    message: "Great work on the presentation yesterday, team! The client was very impressed with our progress.",
-    avatarColor: "bg-pink-500",
-    initials: "LA"
   }
 ];
 
-export function GlobalChatPanel() {
+interface GroupChatPanelProps {
+  groupName: string;
+  memberCount: number;
+}
+
+export function GroupChatPanel({ groupName, memberCount }: GroupChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [message, setMessage] = useState("");
-  const [rateLimitCountdown, setRateLimitCountdown] = useState(0);
-  const [activeUsers] = useState(5); // Mock number of active users
+  const [activeUsers] = useState(3); // Mock number of active users
   const [typingUsers] = useState([
-    { initials: "SJ", color: "bg-blue-500" },
-    { initials: "MC", color: "bg-green-500" }
+    { initials: "SJ", color: "bg-blue-500" }
   ]); // Mock typing users
-
-  useEffect(() => {
-    if (rateLimitCountdown > 0) {
-      const timer = setTimeout(() => {
-        setRateLimitCountdown(rateLimitCountdown - 1);
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [rateLimitCountdown]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (message.trim() && rateLimitCountdown === 0) {
+    if (message.trim()) {
       const newMessage: Message = {
         id: Date.now().toString(),
         author: "You",
@@ -90,7 +60,6 @@ export function GlobalChatPanel() {
       };
       setMessages([...messages, newMessage]);
       setMessage("");
-      setRateLimitCountdown(10); // Start 10 second countdown
     }
   };
 
@@ -106,8 +75,9 @@ export function GlobalChatPanel() {
       {/* Channel Header */}
       <div className="h-12 border-b border-gray-200 flex items-center justify-between px-4">
         <div className="flex items-center gap-2">
-          <Hash className="h-5 w-5 text-gray-600" />
-          <span>Global Chat</span>
+          <Users className="h-5 w-5 text-gray-600" />
+          <span>{groupName}</span>
+          <span className="text-xs text-gray-500">({memberCount} members)</span>
         </div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -174,12 +144,6 @@ export function GlobalChatPanel() {
           <span className="text-xs text-gray-500 ml-auto">{activeUsers} people active</span>
         </div>
 
-        {rateLimitCountdown > 0 && (
-          <div className="mb-2 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
-            Please wait {rateLimitCountdown} seconds before sending another message
-          </div>
-        )}
-
         <form onSubmit={handleSubmit}>
           <div className="border border-gray-300 rounded-lg focus-within:border-[#6264A7] focus-within:ring-1 focus-within:ring-[#6264A7]">
             {/* Formatting Toolbar */}
@@ -224,7 +188,7 @@ export function GlobalChatPanel() {
                 type="submit"
                 size="sm"
                 className="bg-[#6264A7] hover:bg-[#5558A0]"
-                disabled={!message.trim() || rateLimitCountdown > 0}
+                disabled={!message.trim()}
               >
                 <Send className="h-4 w-4 mr-1" />
                 Send

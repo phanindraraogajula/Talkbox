@@ -1,4 +1,4 @@
-import { Search, Settings, MoreVertical, LogOut } from "lucide-react";
+import { Search, MoreVertical, LogOut } from "lucide-react";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 
@@ -22,18 +22,17 @@ export function TopBar({ onLogout }: TopBarProps) {
 
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" className="h-9 w-9">
-          <Settings className="h-5 w-5 text-gray-600" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-9 w-9">
           <MoreVertical className="h-5 w-5 text-gray-600" />
         </Button>
         <div className="h-8 w-px bg-gray-200 mx-1" />
         <Button
           onClick={onLogout}
-          className="h-9 px-4 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white gap-2 shadow-sm"
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 text-red-600 hover:bg-red-50 hover:text-red-700"
+          title="Logout"
         >
-          <LogOut className="h-4 w-4" />
-          <span>Logout</span>
+          <LogOut className="h-5 w-5" />
         </Button>
       </div>
     </div>
