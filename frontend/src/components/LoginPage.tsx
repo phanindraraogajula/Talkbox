@@ -3,7 +3,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { motion } from "motion/react";
-import { backend } from "../../../constants";
+import { backend } from "../../constants";
 
 interface LoginPageProps {
   onLogin: (username: string) => void;

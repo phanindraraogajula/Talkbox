@@ -19,7 +19,7 @@ import { Avatar, AvatarFallback } from "./ui/avatar";
 import { ScrollArea } from "./ui/scroll-area";
 import { Textarea } from "./ui/textarea";
 import { Separator } from "./ui/separator";
-import { backend } from "../../../constants";
+import { backend } from "../../constants";
 import { io, type Socket } from "socket.io-client";
 
 interface Message {

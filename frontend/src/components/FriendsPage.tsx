@@ -13,14 +13,14 @@ import {
 } from "./ui/dialog";
 import { Label } from "./ui/label";
 import { GroupChatPanel } from "./GroupChatPanel";
-import { backend } from "../../../constants";
+import { backend } from "../../constants";
 import { io } from "socket.io-client";
 
 const API_BASE = `http://${backend.IP}:${backend.PORT}`;
 
 interface Friend {
   id: number;
-  username: string;        // backend userId (e.g. "karthik01")
+  username: string;        // backend userId
   displayName: string;     // what we show in UI
   status: "Online" | "Away" | "Offline";
   color: string;
@@ -43,15 +43,16 @@ interface Group {
 }
 
 interface FriendsPageProps {
-  username: string; // logged-in userId
+  username: string; // currently logged in userId
 }
 
-// ---- helpers ----
+/* ---------- helpers that accept number OR string safely ---------- */
 
-function usernameToId(username: string): number {
+function usernameToId(username: string | number): number {
+  const s = String(username ?? "");
   let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = (hash * 31 + username.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
   }
   return hash;
 }
@@ -71,21 +72,25 @@ const COLOR_CLASSES = [
   "bg-lime-500",
 ];
 
-function colorFromUsername(username: string): string {
-  const id = usernameToId(username);
+function colorFromUsername(username: string | number): string {
+  const s = String(username ?? "");
+  const id = usernameToId(s);
   return COLOR_CLASSES[id % COLOR_CLASSES.length];
 }
 
-function initialsFromUsername(username: string): string {
-  if (!username) return "??";
-  if (username.includes(" ")) {
-    const parts = username.split(" ").filter(Boolean);
+function initialsFromUsername(username: string | number): string {
+  const s = String(username ?? "").trim();
+  if (!s) return "??";
+
+  if (s.includes(" ")) {
+    const parts = s.split(" ").filter(Boolean);
     return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
   }
-  return username.slice(0, 2).toUpperCase();
+
+  return s.slice(0, 2).toUpperCase();
 }
 
-// ---------------- FriendsPage ----------------
+/* ---------------- FriendsPage ---------------- */
 
 export function FriendsPage({ username }: FriendsPageProps) {
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -99,7 +104,7 @@ export function FriendsPage({ username }: FriendsPageProps) {
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<number[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
 
-  // realtime online users from backend
+  // realtime online users from backend (Socket.IO + /chat/online-users)
   const [onlineUsernames, setOnlineUsernames] = useState<string[]>([]);
   const [socketConnected, setSocketConnected] = useState(false);
 
@@ -120,7 +125,7 @@ export function FriendsPage({ username }: FriendsPageProps) {
       setSocketConnected(false);
     });
 
-    // initial fetch as fallback
+    // REST fallback – in case socket misses something
     const fetchOnline = async () => {
       try {
         const res = await fetch(`${API_BASE}/chat/online-users`);
@@ -148,16 +153,22 @@ export function FriendsPage({ username }: FriendsPageProps) {
         const res = await fetch(
           `${API_BASE}/friend/list?userId=${encodeURIComponent(username)}`
         );
-        if (!res.ok) return;
+
+        if (!res.ok) {
+          console.warn("friend/list returned status", res.status);
+          return;
+        }
+
         const data = await res.json();
         if (!Array.isArray(data.friends)) return;
 
-        const mapped: Friend[] = data.friends.map((friendUsername: string) => {
+        const mapped: Friend[] = data.friends.map((raw: any) => {
+          const friendUsername = String(raw); // handles string/number
           const id = usernameToId(friendUsername);
           return {
             id,
             username: friendUsername,
-            displayName: friendUsername, // if you later get full name, put it here
+            displayName: friendUsername,
             status: "Offline",
             color: colorFromUsername(friendUsername),
             initials: initialsFromUsername(friendUsername),
@@ -212,7 +223,7 @@ export function FriendsPage({ username }: FriendsPageProps) {
 
   const filteredAvailableUsers = availableUsers.filter((user) => {
     const q = addSearchQuery.trim().toLowerCase();
-    if (!q) return true;
+    if (!q) return false; // 👈 important: don't show anything when empty
     return (
       user.displayName.toLowerCase().includes(q) ||
       user.username.toLowerCase().includes(q)
@@ -240,7 +251,6 @@ export function FriendsPage({ username }: FriendsPageProps) {
         return;
       }
 
-      // only add to UI if not already present
       setFriends((prev) => {
         if (prev.some((f) => f.username === user.username)) {
           return prev;
@@ -249,7 +259,7 @@ export function FriendsPage({ username }: FriendsPageProps) {
           id: user.id,
           username: user.username,
           displayName: user.displayName,
-          status: "Online", // they are in online list
+          status: "Online",
           color: user.color,
           initials: user.initials,
         };
@@ -257,6 +267,7 @@ export function FriendsPage({ username }: FriendsPageProps) {
       });
 
       setAddSearchQuery("");
+      setShowAddDialog(false);
     } catch (err) {
       console.error("Error adding friend", err);
     }
@@ -458,8 +469,7 @@ export function FriendsPage({ username }: FriendsPageProps) {
           <DialogHeader>
             <DialogTitle>Add Friends</DialogTitle>
             <DialogDescription>
-              Shows users who are currently online. Search and add them to your
-              friends list.
+              Search for a user and add them to your friends list.
             </DialogDescription>
           </DialogHeader>
 
@@ -476,9 +486,9 @@ export function FriendsPage({ username }: FriendsPageProps) {
             </div>
 
             <div className="max-h-[300px] overflow-auto space-y-2">
-              {availableUsers.length === 0 ? (
+              {addSearchQuery.trim() === "" ? (
                 <div className="text-center py-8 text-gray-500">
-                  No online users available to add
+                  Start typing to search for users
                 </div>
               ) : filteredAvailableUsers.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
