@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/prisma"
@@ -14,6 +8,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// -------------------- USERS --------------------
 model User {
   id        Int      @id @default(autoincrement())
   userId    String   @unique
@@ -23,10 +18,29 @@ model User {
   friends   String[] @default([])
   createdAt DateTime @default(now())
 
-  sentMessages     Message[] @relation("SentMessages") // relation for messages sent
-  receivedMessages Message[] @relation("PrivateMessages") // relation for messages received privately
+  // Global chat relations
+  sentMessages     Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("PrivateMessages")
+
+  // Private messages using usernames
+  sentPrivateMessages     PrivateMessage[] @relation("SentPrivateMessages")
+  receivedPrivateMessages PrivateMessage[] @relation("ReceivedPrivateMessages")
+
+  // Groups
+  groups        Group[]        @relation("UserGroups") // Many-to-many
+  groupMessages GroupMessage[]
 }
 
+// -------------------- GROUPS --------------------
+model Group {
+  id        Int            @id @default(autoincrement())
+  name      String
+  members   User[]         @relation("UserGroups") // Many-to-many
+  messages  GroupMessage[]
+  createdAt DateTime       @default(now())
+}
+
+// -------------------- GLOBAL MESSAGES --------------------
 model Message {
   id         Int      @id @default(autoincrement())
   content    String
@@ -36,4 +50,28 @@ model Message {
 
   sender   User  @relation("SentMessages", fields: [senderId], references: [id])
   receiver User? @relation("PrivateMessages", fields: [receiverId], references: [id])
+}
+
+// -------------------- PRIVATE MESSAGES --------------------
+model PrivateMessage {
+  id         Int      @id @default(autoincrement())
+  content    String
+  senderId   String
+  receiverId String
+  createdAt  DateTime @default(now())
+
+  sender   User @relation("SentPrivateMessages", fields: [senderId], references: [userId])
+  receiver User @relation("ReceivedPrivateMessages", fields: [receiverId], references: [userId])
+}
+
+// -------------------- GROUP MESSAGES --------------------
+model GroupMessage {
+  id        Int      @id @default(autoincrement())
+  content   String
+  groupId   Int
+  senderId  Int
+  createdAt DateTime @default(now())
+
+  sender User  @relation(fields: [senderId], references: [id])
+  group  Group @relation(fields: [groupId], references: [id])
 }

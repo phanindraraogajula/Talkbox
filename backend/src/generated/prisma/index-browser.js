@@ -131,11 +131,33 @@ exports.Prisma.UserScalarFieldEnum = {
   createdAt: 'createdAt'
 };
 
+exports.Prisma.GroupScalarFieldEnum = {
+  id: 'id',
+  name: 'name',
+  createdAt: 'createdAt'
+};
+
 exports.Prisma.MessageScalarFieldEnum = {
   id: 'id',
   content: 'content',
   senderId: 'senderId',
   receiverId: 'receiverId',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.PrivateMessageScalarFieldEnum = {
+  id: 'id',
+  content: 'content',
+  senderId: 'senderId',
+  receiverId: 'receiverId',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.GroupMessageScalarFieldEnum = {
+  id: 'id',
+  content: 'content',
+  groupId: 'groupId',
+  senderId: 'senderId',
   createdAt: 'createdAt'
 };
 
@@ -157,7 +179,10 @@ exports.Prisma.NullsOrder = {
 
 exports.Prisma.ModelName = {
   User: 'User',
-  Message: 'Message'
+  Group: 'Group',
+  Message: 'Message',
+  PrivateMessage: 'PrivateMessage',
+  GroupMessage: 'GroupMessage'
 };
 
 /**

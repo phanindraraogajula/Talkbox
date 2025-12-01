@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { sendMessage, getMessages } = require('../controllers/messageController');
+const { sendMessage, getMessagesWithFriend } = require('../controllers/messageController');
 
-router.post('/', sendMessage);   // send a message
-router.get('/', getMessages);    // get messages (global or private)
+router.post('/send', sendMessage);
+router.get('/with/:meId/:friendId', getMessagesWithFriend);
 
 module.exports = router;

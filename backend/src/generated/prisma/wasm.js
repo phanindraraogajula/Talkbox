@@ -103,11 +103,33 @@ exports.Prisma.UserScalarFieldEnum = {
   createdAt: 'createdAt'
 };
 
+exports.Prisma.GroupScalarFieldEnum = {
+  id: 'id',
+  name: 'name',
+  createdAt: 'createdAt'
+};
+
 exports.Prisma.MessageScalarFieldEnum = {
   id: 'id',
   content: 'content',
   senderId: 'senderId',
   receiverId: 'receiverId',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.PrivateMessageScalarFieldEnum = {
+  id: 'id',
+  content: 'content',
+  senderId: 'senderId',
+  receiverId: 'receiverId',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.GroupMessageScalarFieldEnum = {
+  id: 'id',
+  content: 'content',
+  groupId: 'groupId',
+  senderId: 'senderId',
   createdAt: 'createdAt'
 };
 
@@ -129,7 +151,10 @@ exports.Prisma.NullsOrder = {
 
 exports.Prisma.ModelName = {
   User: 'User',
-  Message: 'Message'
+  Group: 'Group',
+  Message: 'Message',
+  PrivateMessage: 'PrivateMessage',
+  GroupMessage: 'GroupMessage'
 };
 /**
  * Create the Client
@@ -142,7 +167,7 @@ const config = {
       "value": "prisma-client-js"
     },
     "output": {
-      "value": "/Users/kmangineni/Downloads/talk-box/src/generated/prisma",
+      "value": "/Users/kmangineni/Downloads/chatbox/backend/src/generated/prisma",
       "fromEnvVar": null
     },
     "config": {
@@ -156,7 +181,7 @@ const config = {
       }
     ],
     "previewFeatures": [],
-    "sourceFilePath": "/Users/kmangineni/Downloads/talk-box/prisma/schema.prisma",
+    "sourceFilePath": "/Users/kmangineni/Downloads/chatbox/backend/prisma/schema.prisma",
     "isCustomOutput": true
   },
   "relativeEnvPaths": {
@@ -179,13 +204,13 @@ const config = {
       }
     }
   },
-  "inlineSchema": "// This is your Prisma schema file,\n// learn more about it in the docs: https://pris.ly/d/prisma-schema\n\n// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?\n// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init\n\ngenerator client {\n  provider = \"prisma-client-js\"\n  output   = \"../src/generated/prisma\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n  url      = env(\"DATABASE_URL\")\n}\n\nmodel User {\n  id        Int      @id @default(autoincrement())\n  userId    String   @unique\n  firstName String?\n  lastName  String?\n  password  String\n  friends   String[] @default([])\n  createdAt DateTime @default(now())\n\n  sentMessages     Message[] @relation(\"SentMessages\") // relation for messages sent\n  receivedMessages Message[] @relation(\"PrivateMessages\") // relation for messages received privately\n}\n\nmodel Message {\n  id         Int      @id @default(autoincrement())\n  content    String\n  senderId   Int\n  receiverId Int? // null = global chat\n  createdAt  DateTime @default(now())\n\n  sender   User  @relation(\"SentMessages\", fields: [senderId], references: [id])\n  receiver User? @relation(\"PrivateMessages\", fields: [receiverId], references: [id])\n}\n",
-  "inlineSchemaHash": "222d6b519e3c2d7916569e2ebbe42c7ac3e66b58040a2f40f1ec37d3b671a208",
+  "inlineSchema": "generator client {\n  provider = \"prisma-client-js\"\n  output   = \"../src/generated/prisma\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n  url      = env(\"DATABASE_URL\")\n}\n\n// -------------------- USERS --------------------\nmodel User {\n  id        Int      @id @default(autoincrement())\n  userId    String   @unique\n  firstName String?\n  lastName  String?\n  password  String\n  friends   String[] @default([])\n  createdAt DateTime @default(now())\n\n  // Global chat relations\n  sentMessages     Message[] @relation(\"SentMessages\")\n  receivedMessages Message[] @relation(\"PrivateMessages\")\n\n  // Private messages using usernames\n  sentPrivateMessages     PrivateMessage[] @relation(\"SentPrivateMessages\")\n  receivedPrivateMessages PrivateMessage[] @relation(\"ReceivedPrivateMessages\")\n\n  // Groups\n  groups        Group[]        @relation(\"UserGroups\") // Many-to-many\n  groupMessages GroupMessage[]\n}\n\n// -------------------- GROUPS --------------------\nmodel Group {\n  id        Int            @id @default(autoincrement())\n  name      String\n  members   User[]         @relation(\"UserGroups\") // Many-to-many\n  messages  GroupMessage[]\n  createdAt DateTime       @default(now())\n}\n\n// -------------------- GLOBAL MESSAGES --------------------\nmodel Message {\n  id         Int      @id @default(autoincrement())\n  content    String\n  senderId   Int\n  receiverId Int? // null = global chat\n  createdAt  DateTime @default(now())\n\n  sender   User  @relation(\"SentMessages\", fields: [senderId], references: [id])\n  receiver User? @relation(\"PrivateMessages\", fields: [receiverId], references: [id])\n}\n\n// -------------------- PRIVATE MESSAGES --------------------\nmodel PrivateMessage {\n  id         Int      @id @default(autoincrement())\n  content    String\n  senderId   String\n  receiverId String\n  createdAt  DateTime @default(now())\n\n  sender   User @relation(\"SentPrivateMessages\", fields: [senderId], references: [userId])\n  receiver User @relation(\"ReceivedPrivateMessages\", fields: [receiverId], references: [userId])\n}\n\n// -------------------- GROUP MESSAGES --------------------\nmodel GroupMessage {\n  id        Int      @id @default(autoincrement())\n  content   String\n  groupId   Int\n  senderId  Int\n  createdAt DateTime @default(now())\n\n  sender User  @relation(fields: [senderId], references: [id])\n  group  Group @relation(fields: [groupId], references: [id])\n}\n",
+  "inlineSchemaHash": "09557b09e94fd0e4b257925ee430a894d25e954bb5766121beda4f9d8cd2f0ce",
   "copyEngine": true
 }
 config.dirname = '/'
 
-config.runtimeDataModel = JSON.parse("{\"models\":{\"User\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"userId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"firstName\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"lastName\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"password\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"friends\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"sentMessages\",\"kind\":\"object\",\"type\":\"Message\",\"relationName\":\"SentMessages\"},{\"name\":\"receivedMessages\",\"kind\":\"object\",\"type\":\"Message\",\"relationName\":\"PrivateMessages\"}],\"dbName\":null},\"Message\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"content\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"senderId\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"receiverId\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"sender\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"SentMessages\"},{\"name\":\"receiver\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"PrivateMessages\"}],\"dbName\":null}},\"enums\":{},\"types\":{}}")
+config.runtimeDataModel = JSON.parse("{\"models\":{\"User\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"userId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"firstName\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"lastName\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"password\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"friends\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"sentMessages\",\"kind\":\"object\",\"type\":\"Message\",\"relationName\":\"SentMessages\"},{\"name\":\"receivedMessages\",\"kind\":\"object\",\"type\":\"Message\",\"relationName\":\"PrivateMessages\"},{\"name\":\"sentPrivateMessages\",\"kind\":\"object\",\"type\":\"PrivateMessage\",\"relationName\":\"SentPrivateMessages\"},{\"name\":\"receivedPrivateMessages\",\"kind\":\"object\",\"type\":\"PrivateMessage\",\"relationName\":\"ReceivedPrivateMessages\"},{\"name\":\"groups\",\"kind\":\"object\",\"type\":\"Group\",\"relationName\":\"UserGroups\"},{\"name\":\"groupMessages\",\"kind\":\"object\",\"type\":\"GroupMessage\",\"relationName\":\"GroupMessageToUser\"}],\"dbName\":null},\"Group\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"name\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"members\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"UserGroups\"},{\"name\":\"messages\",\"kind\":\"object\",\"type\":\"GroupMessage\",\"relationName\":\"GroupToGroupMessage\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"}],\"dbName\":null},\"Message\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"content\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"senderId\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"receiverId\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"sender\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"SentMessages\"},{\"name\":\"receiver\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"PrivateMessages\"}],\"dbName\":null},\"PrivateMessage\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"content\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"senderId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"receiverId\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"sender\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"SentPrivateMessages\"},{\"name\":\"receiver\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"ReceivedPrivateMessages\"}],\"dbName\":null},\"GroupMessage\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"content\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"groupId\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"senderId\",\"kind\":\"scalar\",\"type\":\"Int\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\"},{\"name\":\"sender\",\"kind\":\"object\",\"type\":\"User\",\"relationName\":\"GroupMessageToUser\"},{\"name\":\"group\",\"kind\":\"object\",\"type\":\"Group\",\"relationName\":\"GroupToGroupMessage\"}],\"dbName\":null}},\"enums\":{},\"types\":{}}")
 defineDmmfProperty(exports.Prisma, config.runtimeDataModel)
 config.engineWasm = {
   getRuntime: async () => require('./query_engine_bg.js'),

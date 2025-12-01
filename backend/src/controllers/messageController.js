@@ -1,76 +1,77 @@
 const prisma = require('../db');
 
+// -------------------- SEND PRIVATE MESSAGE --------------------
 const sendMessage = async (req, res) => {
   try {
-    const { senderId, receiverId, content } = req.body;
+    const { senderId, receiverId, content } = req.body; // userId strings
 
-    if (!senderId || !content) {
-      return res.status(400).json({ error: "senderId and content are required" });
+    // Validate sender exists
+    const sender = await prisma.user.findUnique({ where: { userId: senderId } });
+    if (!sender) {
+      return res.status(404).json({ error: 'Sender not found' });
     }
 
-    // Optional: rate limiting logic here if needed
+    // Validate receiver exists
+    const receiver = await prisma.user.findUnique({ where: { userId: receiverId } });
+    if (!receiver) {
+      return res.status(404).json({ error: 'Receiver not found' });
+    }
 
-    const message = await prisma.message.create({
+    // Optional: enforce friendship before sending message
+    if (!sender.friends.includes(receiverId)) {
+      return res.status(403).json({ error: 'You can only message friends' });
+    }
+
+    // Create private message
+    const privateMessage = await prisma.privateMessage.create({
       data: {
-        content,
         senderId,
-        receiverId: receiverId || null, // null = global
-      },
-      include: {
-        sender: true,
-        receiver: true,
-      },
+        receiverId,
+        content
+      }
     });
 
     res.status(201).json({
-      id: message.id,
-      content: message.content,
-      senderId: message.senderId,
-      senderUsername: message.sender.userId,
-      receiverId: message.receiverId,
-      receiverUsername: message.receiver ? message.receiver.userId : null,
-      timestamp: message.createdAt
+      id: privateMessage.id,
+      content: privateMessage.content,
+      senderId: privateMessage.senderId,
+      receiverId: privateMessage.receiverId,
+      timestamp: privateMessage.createdAt
     });
-
   } catch (err) {
-    console.error("Send message error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error('Send private message error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-const getMessages = async (req, res) => {
+// -------------------- GET MESSAGES BETWEEN TWO USERS --------------------
+const getMessagesWithFriend = async (req, res) => {
   try {
-    const { receiverId } = req.query; // optional, null = global
+    const { meId, friendId } = req.params; // userId strings
 
-    const messages = await prisma.message.findMany({
-      where: receiverId ? { 
+    // Fetch all messages between two users
+    const messages = await prisma.privateMessage.findMany({
+      where: {
         OR: [
-          { receiverId: parseInt(receiverId) },
-          { senderId: parseInt(receiverId) } // include messages from sender
+          { senderId: meId, receiverId: friendId },
+          { senderId: friendId, receiverId: meId }
         ]
-      } : { receiverId: null },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        sender: true,
-        receiver: true,
       },
+      orderBy: { createdAt: 'asc' }
     });
 
-    const formatted = messages.map(msg => ({
+    // Format response
+    res.json(messages.map(msg => ({
       id: msg.id,
       content: msg.content,
       senderId: msg.senderId,
-      senderUsername: msg.sender.userId,
       receiverId: msg.receiverId,
-      receiverUsername: msg.receiver ? msg.receiver.userId : null,
       timestamp: msg.createdAt
-    }));
-
-    res.json(formatted);
+    })));
   } catch (err) {
-    console.error("Get messages error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error('Fetch private messages error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-module.exports = { sendMessage, getMessages };
+module.exports = { sendMessage, getMessagesWithFriend };
