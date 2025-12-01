@@ -5,6 +5,8 @@ import { Label } from "./ui/label";
 import { motion } from "motion/react";
 import { backend } from "../../constants";
 
+const ROOT_USER_KEY = "talkbox_root_user";
+
 interface SignUpPageProps {
   onSignUp: (username: string) => void;
   onBackToLogin: () => void;
@@ -40,13 +42,9 @@ export function SignUpPage({ onSignUp, onBackToLogin }: SignUpPageProps) {
         password,
       };
 
-      console.log("Sending:", body);
-
       const res = await fetch(`http://${backend.IP}:${backend.PORT}/auth/register/`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 
@@ -54,15 +52,19 @@ export function SignUpPage({ onSignUp, onBackToLogin }: SignUpPageProps) {
 
       if (!res.ok) {
         const msg =
-          (data.detail as string) ||
-          (data.message as string) ||
+          data.detail ||
+          data.message ||
           "Registration failed.";
         setError(msg);
         return;
       }
 
-      // Auto login if backend returns useful data
+      // 🔥 Save root user permanently (same as login page)
+      localStorage.setItem(ROOT_USER_KEY, userId);
+
+      // auto login (or go back to login)
       onSignUp(userId);
+
     } catch (err) {
       console.error(err);
       setError("Unable to reach server.");

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { UserPlus, Search, MessageCircle, X, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { UserPlus, Search, MessageCircle, Users } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Avatar, AvatarFallback } from "./ui/avatar";
-import { Badge } from "./ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -11,51 +10,63 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { Label } from "./ui/label";
 import { GroupChatPanel } from "./GroupChatPanel";
+import { DirectChatPanel } from "./DirectChatPanel";
 import { backend } from "../../constants";
 import { io } from "socket.io-client";
 
 const API_BASE = `http://${backend.IP}:${backend.PORT}`;
 
+/* ---------- TYPES ---------- */
+
 interface Friend {
-  id: number;
-  username: string;        // backend userId
-  displayName: string;     // what we show in UI
+  id: number; // numeric backend user id
+  username: string;
+  displayName: string;
+  firstName?: string;
+  lastName?: string;
   status: "Online" | "Away" | "Offline";
   color: string;
   initials: string;
 }
 
 interface AvailableUser {
-  id: number;
+  id: number;          // numeric backend user id
   username: string;
   displayName: string;
+  firstName?: string;
+  lastName?: string;
   color: string;
   initials: string;
+}
+
+interface GroupMember {
+  userId: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+interface GroupPreviewMessage {
+  id: number;
+  content: string;
+  senderUserId: string;
+  createdAt: string;
 }
 
 interface Group {
   id: number;
   name: string;
-  members: number[];
+  members: GroupMember[];
+  messages?: GroupPreviewMessage[];
+  createdAt?: string;
   color: string;
 }
 
 interface FriendsPageProps {
-  username: string; // currently logged in userId
+  username: string;
 }
 
-/* ---------- helpers that accept number OR string safely ---------- */
-
-function usernameToId(username: string | number): number {
-  const s = String(username ?? "");
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) {
-    hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-  }
-  return hash;
-}
+/* ---------- HELPERS ---------- */
 
 const COLOR_CLASSES = [
   "bg-blue-500",
@@ -74,117 +85,252 @@ const COLOR_CLASSES = [
 
 function colorFromUsername(username: string | number): string {
   const s = String(username ?? "");
-  const id = usernameToId(s);
-  return COLOR_CLASSES[id % COLOR_CLASSES.length];
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  }
+  return COLOR_CLASSES[hash % COLOR_CLASSES.length];
 }
 
-function initialsFromUsername(username: string | number): string {
-  const s = String(username ?? "").trim();
+function initialsFromUsername(name: string): string {
+  const s = name.trim();
   if (!s) return "??";
-
-  if (s.includes(" ")) {
-    const parts = s.split(" ").filter(Boolean);
-    return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
-  }
-
+  const parts = s.split(" ");
+  if (parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase();
   return s.slice(0, 2).toUpperCase();
 }
 
-/* ---------------- FriendsPage ---------------- */
+/* ============================================================
+   FRIENDS PAGE
+============================================================ */
 
 export function FriendsPage({ username }: FriendsPageProps) {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showGroupDialog, setShowGroupDialog] = useState(false);
-  const [addSearchQuery, setAddSearchQuery] = useState("");
-  const [groupName, setGroupName] = useState("");
-  const [groupSearchQuery, setGroupSearchQuery] = useState("");
-  const [selectedGroupMembers, setSelectedGroupMembers] = useState<number[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
 
-  // realtime online users from backend (Socket.IO + /chat/online-users)
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [addSearchQuery, setAddSearchQuery] = useState("");
+  const [searchClicked, setSearchClicked] = useState(false);
+  const [searchResults, setSearchResults] = useState<AvailableUser[]>([]);
+
+  const [showGroupDialog, setShowGroupDialog] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  const [selectedGroupMemberUsernames, setSelectedGroupMemberUsernames] =
+    useState<string[]>([]);
+
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
+
   const [onlineUsernames, setOnlineUsernames] = useState<string[]>([]);
   const [socketConnected, setSocketConnected] = useState(false);
 
-  // ---- socket.io: track active users in real time ----
+  const [rootUser, setRootUser] = useState("");
+  const [selfNumericId, setSelfNumericId] = useState<number | null>(null);
+
   useEffect(() => {
+    const storedUser = localStorage.getItem("talkbox_root_user");
+    if (storedUser) setRootUser(storedUser);
+  }, []);
+
+  const effectiveUserId = rootUser || username; // username string
+
+  /* ========== SOCKET CONNECTION (ONLINE USERS) ========== */
+
+  useEffect(() => {
+    if (!effectiveUserId) return;
+
     const socket = io(API_BASE, { transports: ["websocket"] });
 
     socket.on("connect", () => {
       setSocketConnected(true);
-      socket.emit("registerUser", username);
+      socket.emit("registerUser", effectiveUserId);
     });
 
     socket.on("activeUsers", (users: string[]) => {
       setOnlineUsernames(users || []);
     });
 
-    socket.on("disconnect", () => {
-      setSocketConnected(false);
-    });
-
-    // REST fallback – in case socket misses something
-    const fetchOnline = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/chat/online-users`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (Array.isArray(data.onlineUsers)) {
-          setOnlineUsernames(data.onlineUsers);
-        }
-      } catch {
-        // ignore
-      }
-    };
-    fetchOnline();
+    socket.on("disconnect", () => setSocketConnected(false));
 
     return () => {
       socket.removeAllListeners();
       socket.disconnect();
     };
-  }, [username]);
+  }, [effectiveUserId]);
 
-  // ---- fetch friend list from backend ----
+  /* ========== FETCH SELF NUMERIC ID ========== */
+
+  useEffect(() => {
+    const fetchSelf = async () => {
+      if (!effectiveUserId) return;
+      try {
+        const res = await fetch(
+          `${API_BASE}/friend/search?query=${encodeURIComponent(
+            effectiveUserId
+          )}`
+        );
+        if (!res.ok) {
+          console.error("Failed to fetch self user", res.status);
+          return;
+        }
+        const data = await res.json();
+        if (!data.exists || !data.user) {
+          console.warn("Self user not found in friend/search", data);
+          return;
+        }
+        setSelfNumericId(data.user.id);
+        console.log(
+          "[FriendsPage] Self numeric id:",
+          data.user.id,
+          "for username",
+          effectiveUserId
+        );
+      } catch (err) {
+        console.error("Error fetching self numeric id", err);
+      }
+    };
+
+    fetchSelf();
+  }, [effectiveUserId]);
+
+  /* ========== FETCH FRIEND LIST ========== */
+
   useEffect(() => {
     const fetchFriends = async () => {
       try {
-        const res = await fetch(
-          `${API_BASE}/friend/list?userId=${encodeURIComponent(username)}`
-        );
+        const selfUserId = effectiveUserId;
+        if (!selfUserId) return;
 
-        if (!res.ok) {
-          console.warn("friend/list returned status", res.status);
+        const res = await fetch(
+          `${API_BASE}/friend/list?userId=${encodeURIComponent(selfUserId)}`
+        );
+        const data = await res.json();
+
+        if (!Array.isArray(data.friends)) {
+          console.warn("friend/list returned unexpected payload", data);
           return;
         }
 
-        const data = await res.json();
-        if (!Array.isArray(data.friends)) return;
+        const usernames: string[] = data.friends;
 
-        const mapped: Friend[] = data.friends.map((raw: any) => {
-          const friendUsername = String(raw); // handles string/number
-          const id = usernameToId(friendUsername);
-          return {
-            id,
-            username: friendUsername,
-            displayName: friendUsername,
-            status: "Offline",
-            color: colorFromUsername(friendUsername),
-            initials: initialsFromUsername(friendUsername),
-          };
+        const friendPromises = usernames.map(async (u: string) => {
+          try {
+            const detailRes = await fetch(
+              `${API_BASE}/friend/search?query=${encodeURIComponent(u)}`
+            );
+            if (!detailRes.ok) {
+              console.error("friend/search failed for", u, detailRes.status);
+              return null;
+            }
+            const detailData = await detailRes.json();
+            if (!detailData.exists || !detailData.user) return null;
+
+            const user = detailData.user;
+
+            const fullName = `${user.firstName ?? ""} ${
+              user.lastName ?? ""
+            }`.trim();
+            const displayName = fullName || user.userId;
+
+            const friend: Friend = {
+              id: user.id, // numeric backend id
+              username: user.userId,
+              displayName,
+              firstName: user.firstName ?? "",
+              lastName: user.lastName ?? "",
+              status: "Offline",
+              color: colorFromUsername(user.userId),
+              initials: initialsFromUsername(displayName),
+            };
+
+            return friend;
+          } catch (err) {
+            console.error("Error fetching friend detail for", u, err);
+            return null;
+          }
         });
 
-        setFriends(mapped);
+        const fullFriends = (await Promise.all(friendPromises)).filter(
+          (f): f is Friend => f !== null
+        );
+
+        setFriends(fullFriends);
       } catch (err) {
         console.error("Failed to load friends", err);
       }
     };
 
-    fetchFriends();
-  }, [username]);
+    if (effectiveUserId) {
+      fetchFriends();
+    }
+  }, [effectiveUserId]);
 
-  // update friend statuses whenever online list changes
+  /* ========== FETCH GROUPS VIA /group/fetch ========== */
+
+  useEffect(() => {
+    const fetchGroups = async () => {
+      try {
+        const selfUserId = effectiveUserId;
+        if (!selfUserId) return;
+
+        const res = await fetch(
+          `${API_BASE}/group/fetch?userId=${encodeURIComponent(selfUserId)}`
+        );
+
+        if (!res.ok) {
+          console.error("Failed to fetch groups", res.status);
+          return;
+        }
+
+        const data = await res.json();
+        if (!Array.isArray(data)) {
+          console.warn("group/fetch unexpected payload", data);
+          return;
+        }
+
+        const mapped: Group[] = data.map((g: any) => {
+          const members: GroupMember[] = Array.isArray(g.members)
+            ? g.members.map((m: any) => ({
+                userId: m.userId,
+                firstName: m.firstName,
+                lastName: m.lastName,
+              }))
+            : [];
+
+          const messages: GroupPreviewMessage[] | undefined =
+            Array.isArray(g.messages)
+              ? g.messages.map((msg: any) => ({
+                  id: msg.id,
+                  content: msg.content,
+                  senderUserId: msg.sender?.userId ?? "",
+                  createdAt: msg.createdAt,
+                }))
+              : undefined;
+
+          return {
+            id: g.id,
+            name: g.name,
+            members,
+            messages,
+            createdAt: g.createdAt,
+            color: "bg-[#6264A7]",
+          };
+        });
+
+        setGroups(mapped);
+      } catch (err) {
+        console.error("Error loading groups", err);
+      }
+    };
+
+    if (effectiveUserId) {
+      fetchGroups();
+    }
+  }, [effectiveUserId]);
+
+  /* ========== UPDATE FRIEND STATUS WITH ONLINE LIST ========== */
+
   useEffect(() => {
     setFriends((prev) =>
       prev.map((f) => ({
@@ -194,134 +340,209 @@ export function FriendsPage({ username }: FriendsPageProps) {
     );
   }, [onlineUsernames]);
 
-  // ---- available users for Add dialog (online but not already friends, and not you) ----
-  const availableUsers: AvailableUser[] = useMemo(() => {
-    const friendUsernames = new Set(friends.map((f) => f.username));
+  /* ========== FRIEND SEARCH ========== */
 
-    return onlineUsernames
-      .filter((u) => u && u !== username)
-      .filter((u) => !friendUsernames.has(u))
-      .map((u) => {
-        const id = usernameToId(u);
-        return {
-          id,
-          username: u,
-          displayName: u,
-          color: colorFromUsername(u),
-          initials: initialsFromUsername(u),
-        };
-      });
-  }, [onlineUsernames, friends, username]);
+  const handleSearch = async () => {
+    setSearchClicked(true);
 
-  const filteredFriends = friends.filter((friend) =>
-    friend.displayName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+    const q = addSearchQuery.trim();
+    if (!q) {
+      setSearchResults([]);
+      return;
+    }
 
-  const filteredGroups = groups.filter((group) =>
-    group.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+    try {
+      const res = await fetch(
+        `${API_BASE}/friend/search?query=${encodeURIComponent(q)}`
+      );
 
-  const filteredAvailableUsers = availableUsers.filter((user) => {
-    const q = addSearchQuery.trim().toLowerCase();
-    if (!q) return false; // 👈 important: don't show anything when empty
-    return (
-      user.displayName.toLowerCase().includes(q) ||
-      user.username.toLowerCase().includes(q)
-    );
-  });
+      if (!res.ok) {
+        console.error("Search error:", res.status);
+        setSearchResults([]);
+        return;
+      }
 
-  const filteredFriendsForGroup = friends.filter((friend) =>
-    friend.displayName.toLowerCase().includes(groupSearchQuery.toLowerCase())
-  );
+      const data = await res.json();
 
-  // ---- add friend via backend ----
+      if (!data.exists || !data.user) {
+        setSearchResults([]);
+        return;
+      }
+
+      const u = data.user;
+      const foundUsername = u.userId;
+
+      if (foundUsername === username || foundUsername === effectiveUserId) {
+        setSearchResults([]);
+        return;
+      }
+
+      if (friends.some((f) => f.username === foundUsername)) {
+        setSearchResults([]);
+        return;
+      }
+
+      const fullName = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim();
+      const displayName = fullName || foundUsername;
+
+      const resultUser: AvailableUser = {
+        id: u.id, // numeric backend id
+        username: foundUsername,
+        firstName: u.firstName ?? "",
+        lastName: u.lastName ?? "",
+        displayName,
+        color: colorFromUsername(foundUsername),
+        initials: initialsFromUsername(displayName),
+      };
+
+      setSearchResults([resultUser]);
+    } catch (err) {
+      console.error("Error searching user:", err);
+      setSearchResults([]);
+    }
+  };
+
+  /* ========== ADD FRIEND ========== */
+
   const handleAddFriend = async (user: AvailableUser) => {
     try {
-      const res = await fetch(`${API_BASE}/friend/add`, {
+      await fetch(`${API_BASE}/friend/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: username,
-          friendId: user.username,
+          userId: effectiveUserId,   // username for friend/add
+          friendId: user.username,   // username of friend
+        }),
+      });
+
+      setFriends((prev) => [
+        ...prev,
+        {
+          id: user.id, // numeric backend id
+          username: user.username,
+          displayName: user.displayName,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          status: "Online",
+          color: user.color,
+          initials: user.initials,
+        },
+      ]);
+
+      setAddSearchQuery("");
+      setSearchResults([]);
+      setSearchClicked(false);
+      setShowAddDialog(false);
+    } catch (err) {
+      console.error("Error adding friend:", err);
+    }
+  };
+
+  /* ========== GROUPS: SELECT MEMBERS FOR NEW GROUP ========== */
+
+  const toggleGroupMember = (friendUsername: string) => {
+    setSelectedGroupMemberUsernames((prev) =>
+      prev.includes(friendUsername)
+        ? prev.filter((u) => u !== friendUsername)
+        : [...prev, friendUsername]
+    );
+  };
+
+  const handleCreateGroup = async () => {
+    const name = groupName.trim();
+
+    if (!name) {
+      alert("Please enter a group name.");
+      return;
+    }
+    if (selectedGroupMemberUsernames.length === 0) {
+      alert("Please select at least one friend for the group.");
+      return;
+    }
+
+    try {
+      const allUserIds = Array.from(
+        new Set([effectiveUserId, ...selectedGroupMemberUsernames])
+      );
+
+      const res = await fetch(`${API_BASE}/group/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          memberUserIds: allUserIds,
         }),
       });
 
       if (!res.ok) {
-        console.error("Failed to add friend", await res.text());
+        const errorText = await res.text();
+        console.error("Failed to create group", res.status, errorText);
+        alert(
+          `Create group failed (${res.status}). Check console/Network tab for details.`
+        );
         return;
       }
 
-      setFriends((prev) => {
-        if (prev.some((f) => f.username === user.username)) {
-          return prev;
+      const created = await res.json();
+
+      let memberUserIds: string[];
+      if (Array.isArray(created.members)) {
+        if (typeof created.members[0] === "string") {
+          memberUserIds = created.members;
+        } else {
+          memberUserIds = created.members.map((m: any) => m.userId);
         }
-        const newFriend: Friend = {
-          id: user.id,
-          username: user.username,
-          displayName: user.displayName,
-          status: "Online",
-          color: user.color,
-          initials: user.initials,
-        };
-        return [...prev, newFriend];
-      });
+      } else {
+        memberUserIds = allUserIds;
+      }
 
-      setAddSearchQuery("");
-      setShowAddDialog(false);
-    } catch (err) {
-      console.error("Error adding friend", err);
-    }
-  };
-
-  const toggleGroupMember = (friendId: number) => {
-    setSelectedGroupMembers((prev) =>
-      prev.includes(friendId)
-        ? prev.filter((id) => id !== friendId)
-        : [...prev, friendId]
-    );
-  };
-
-  const handleCreateGroup = () => {
-    if (groupName.trim() && selectedGroupMembers.length > 0) {
       const newGroup: Group = {
-        id: Date.now(),
-        name: groupName,
-        members: selectedGroupMembers,
+        id: created.id,
+        name: created.name,
+        members: memberUserIds.map((u) => ({ userId: u })),
         color: "bg-[#6264A7]",
       };
+
       setGroups((prev) => [...prev, newGroup]);
-      setShowGroupDialog(false);
+
       setGroupName("");
-      setSelectedGroupMembers([]);
-      setGroupSearchQuery("");
+      setSelectedGroupMemberUsernames([]);
+      setShowGroupDialog(false);
+
+      setSelectedFriend(null);
+      setSelectedGroup(newGroup);
+    } catch (err) {
+      console.error("Error creating group:", err);
+      alert("Unexpected error while creating group. See console for details.");
     }
   };
+
+  /* ============================================================
+      UI
+  ============================================================ */
 
   return (
     <div className="flex h-full bg-[#F3F2F1]">
-      {/* Friends List */}
+      {/* SIDEBAR */}
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
+        {/* Header */}
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-gray-900">Friends</h2>
+            <h2 className="text-gray-900">Friends & Groups</h2>
             <div className="flex gap-2">
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8"
                 onClick={() => setShowGroupDialog(true)}
-                title="Create Group"
               >
-                <Users className="h-4 w-4" />
+                <Users className="h-5 w-5" />
               </Button>
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8"
                 onClick={() => setShowAddDialog(true)}
-                title="Add Friend"
               >
-                <UserPlus className="h-4 w-4" />
+                <UserPlus className="h-5 w-5" />
               </Button>
             </div>
           </div>
@@ -329,176 +550,157 @@ export function FriendsPage({ username }: FriendsPageProps) {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              type="text"
               placeholder="Search friends..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9 h-9 bg-[#F3F2F1]"
             />
           </div>
-
-          {!socketConnected && (
-            <p className="mt-2 text-xs text-red-500">
-              Not connected to realtime server – showing last known state.
-            </p>
-          )}
         </div>
 
+        {/* Friends + Groups list */}
         <div className="flex-1 overflow-auto">
-          {/* Groups Section */}
-          {filteredGroups.length > 0 && (
-            <div className="border-b border-gray-200">
-              <div className="px-3 py-2 bg-gray-50">
-                <span className="text-xs text-gray-500 uppercase tracking-wide">
-                  Groups
-                </span>
+          {/* Friends */}
+          {friends
+            .filter((f) =>
+              f.displayName.toLowerCase().includes(searchQuery.toLowerCase())
+            )
+            .map((friend) => (
+              <div
+                key={friend.id}
+                className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100"
+                onClick={() => {
+                  setSelectedFriend(friend);
+                  setSelectedGroup(null);
+                }}
+              >
+                <Avatar className={`h-10 w-10 ${friend.color}`}>
+                  <AvatarFallback className={`${friend.color} text-white`}>
+                    {friend.initials}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1">
+                  <h3>{friend.displayName}</h3>
+                  <p className="text-gray-500 text-xs">{friend.status}</p>
+                </div>
               </div>
-              {filteredGroups.map((group) => (
+            ))}
+
+          {/* Groups section */}
+          {groups.length > 0 && (
+            <div className="mt-2">
+              <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Groups
+              </div>
+              {groups.map((group) => (
                 <div
                   key={group.id}
-                  onClick={() => setSelectedGroup(group)}
-                  className={`flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 ${
-                    selectedGroup?.id === group.id
-                      ? "bg-[#6264A7]/10 border-l-4 border-l-[#6264A7]"
-                      : ""
-                  }`}
+                  className="flex items-center gap-3 px-4 py-2 hover:bg-gray-50 cursor-pointer"
+                  onClick={() => {
+                    setSelectedGroup(group);
+                    setSelectedFriend(null);
+                  }}
                 >
-                  <div className="relative">
-                    <Avatar className={`h-10 w-10 ${group.color}`}>
-                      <AvatarFallback
-                        className={`${group.color} text-white text-xs`}
-                      >
-                        <Users className="h-5 w-5" />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="absolute bottom-0 right-0 w-4 h-4 bg-white rounded-full flex items-center justify-center text-[10px] border border-gray-200">
-                      {group.members.length}
+                  <div
+                    className={`h-8 w-8 rounded-full flex items-center justify-center text-white text-xs ${group.color}`}
+                  >
+                    {group.name.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm text-gray-900">{group.name}</div>
+                    <div className="text-xs text-gray-500">
+                      {group.members.length} members
                     </div>
                   </div>
-
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-gray-900 truncate">{group.name}</h3>
-                    <p className="text-gray-500 text-xs truncate">
-                      {group.members.length} member
-                      {group.members.length !== 1 ? "s" : ""}
-                    </p>
-                  </div>
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* Friends Section */}
-          {filteredFriends.length > 0 && (
-            <>
-              {filteredGroups.length > 0 && (
-                <div className="px-3 py-2 bg-gray-50">
-                  <span className="text-xs text-gray-500 uppercase tracking-wide">
-                    Direct Messages
-                  </span>
-                </div>
-              )}
-              {filteredFriends.map((friend) => (
-                <div
-                  key={friend.id}
-                  className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100"
-                >
-                  <div className="relative">
-                    <Avatar className={`h-10 w-10 ${friend.color}`}>
-                      <AvatarFallback
-                        className={`${friend.color} text-white text-xs`}
-                      >
-                        {friend.initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div
-                      className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
-                        friend.status === "Online"
-                          ? "bg-green-500"
-                          : friend.status === "Away"
-                          ? "bg-yellow-500"
-                          : "bg-gray-400"
-                      }`}
-                    />
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-gray-900 truncate">
-                      {friend.displayName}
-                    </h3>
-                    <p className="text-gray-500 truncate">{friend.status}</p>
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
-
-          {filteredFriends.length === 0 && filteredGroups.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              No friends or groups found
             </div>
           )}
         </div>
       </div>
 
-      {/* Chat Area */}
+      {/* CHAT AREA */}
       <div className="flex-1 flex items-center justify-center bg-[#F3F2F1]">
-        {selectedGroup ? (
-          <div className="w-full h-full">
-            <GroupChatPanel
-              groupName={selectedGroup.name}
-              memberCount={selectedGroup.members.length}
-            />
-          </div>
-        ) : (
+        {!selectedFriend && !selectedGroup ? (
           <div className="text-center">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-gray-200 rounded-full mb-4">
-              <MessageCircle className="h-10 w-10 text-gray-400" />
-            </div>
-            <h2 className="text-gray-900 mb-2">Select a conversation</h2>
+            <MessageCircle className="h-10 w-10 text-gray-400 mx-auto mb-2" />
+            <h2>Select a conversation</h2>
             <p className="text-gray-500">
-              Choose a friend from the list to start chatting
+              Choose a friend or a group to start chatting
             </p>
           </div>
-        )}
+        ) : selectedFriend ? (
+          selfNumericId == null ? (
+            <div className="text-sm text-gray-500">
+              Loading your profile for chat…
+            </div>
+          ) : (
+            <DirectChatPanel
+              currentUserId={effectiveUserId}          // username for display
+              currentUserNumericId={selfNumericId}     // numeric id for backend
+              friendUserId={selectedFriend.username}   // friend's username
+              friendNumericId={selectedFriend.id}      // friend's numeric id
+              friendDisplayName={selectedFriend.displayName}
+            />
+          )
+        ) : selectedGroup ? (
+          <GroupChatPanel
+            groupId={selectedGroup.id}
+            groupName={selectedGroup.name}
+            members={selectedGroup.members}
+            currentUserId={effectiveUserId}
+          />
+        ) : null}
       </div>
 
-      {/* Add Friend Dialog */}
+      {/* ADD FRIEND DIALOG */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add Friends</DialogTitle>
             <DialogDescription>
-              Search for a user and add them to your friends list.
+              Search users by username to add as a friend
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                type="text"
-                placeholder="Search by name or username..."
-                value={addSearchQuery}
-                onChange={(e) => setAddSearchQuery(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex gap-2 items-center">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Input
+                  placeholder="Search user by username..."
+                  value={addSearchQuery}
+                  onChange={(e) => setAddSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+
+              <Button
+                onClick={handleSearch}
+                className="bg-[#6264A7] hover:bg-[#5558A0]"
+              >
+                Search
+              </Button>
             </div>
 
             <div className="max-h-[300px] overflow-auto space-y-2">
-              {addSearchQuery.trim() === "" ? (
-                <div className="text-center py-8 text-gray-500">
-                  Start typing to search for users
+              {!searchClicked ? (
+                <div className="text-center py-6 text-gray-500">
+                  Type a username and click Search
                 </div>
-              ) : filteredAvailableUsers.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  No users match this search
+              ) : addSearchQuery.trim() === "" ? (
+                <div className="text-center py-6 text-gray-500">
+                  Enter something to search
+                </div>
+              ) : searchResults.length === 0 ? (
+                <div className="text-center py-6 text-gray-500">
+                  No users found
                 </div>
               ) : (
-                filteredAvailableUsers.map((user) => (
+                searchResults.map((user) => (
                   <div
                     key={user.id}
-                    className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg border border-gray-100"
+                    className="flex items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer"
                   >
                     <Avatar className={`h-10 w-10 ${user.color}`}>
                       <AvatarFallback className={`${user.color} text-white`}>
@@ -506,21 +708,16 @@ export function FriendsPage({ username }: FriendsPageProps) {
                       </AvatarFallback>
                     </Avatar>
 
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-gray-900 truncate">
-                        {user.displayName}
-                      </h3>
-                      <p className="text-gray-500 text-xs truncate">
-                        @{user.username}
-                      </p>
+                    <div className="flex-1">
+                      <h3>{user.displayName}</h3>
+                      <p className="text-gray-500 text-sm">@{user.username}</p>
                     </div>
 
                     <Button
                       size="sm"
-                      onClick={() => handleAddFriend(user)}
                       className="bg-[#6264A7] hover:bg-[#5558A0]"
+                      onClick={() => handleAddFriend(user)}
                     >
-                      <UserPlus className="h-4 w-4 mr-1" />
                       Add
                     </Button>
                   </div>
@@ -531,136 +728,74 @@ export function FriendsPage({ username }: FriendsPageProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Create Group Dialog */}
+      {/* ADD GROUP DIALOG */}
       <Dialog open={showGroupDialog} onOpenChange={setShowGroupDialog}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm-max-w-md sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Create Group</DialogTitle>
             <DialogDescription>
-              Create a new group and add friends to it
+              Name your group and select friends to add.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="groupName">Group Name</Label>
+            <div>
               <Input
-                id="groupName"
-                type="text"
-                placeholder="Enter group name..."
+                placeholder="Group name (e.g., Project Team)"
                 value={groupName}
                 onChange={(e) => setGroupName(e.target.value)}
               />
             </div>
 
-            {selectedGroupMembers.length > 0 && (
-              <div className="space-y-2">
-                <Label>Selected Members ({selectedGroupMembers.length})</Label>
-                <div className="flex flex-wrap gap-2">
-                  {selectedGroupMembers.map((memberId) => {
-                    const member = friends.find((f) => f.id === memberId);
-                    return member ? (
-                      <Badge
-                        key={memberId}
-                        variant="secondary"
-                        className="pl-2 pr-1 py-1 gap-1"
-                      >
-                        <span>{member.displayName}</span>
-                        <button
-                          onClick={() => toggleGroupMember(memberId)}
-                          className="ml-1 hover:bg-gray-300 rounded-full p-0.5"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    ) : null;
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Add Friends</Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Search friends..."
-                  value={groupSearchQuery}
-                  onChange={(e) => setGroupSearchQuery(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-            </div>
-
-            <div className="max-h-[250px] overflow-auto space-y-2">
-              {filteredFriendsForGroup.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  {groupSearchQuery ? "No friends found" : "No friends available"}
+            <div className="max-h-[260px] overflow-auto space-y-2 border rounded-md p-2">
+              {friends.length === 0 ? (
+                <div className="text-center py-4 text-gray-500 text-sm">
+                  You have no friends added yet.
                 </div>
               ) : (
-                filteredFriendsForGroup.map((friend) => (
-                  <div
-                    key={friend.id}
-                    onClick={() => toggleGroupMember(friend.id)}
-                    className={`flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg border cursor-pointer transition-colors ${
-                      selectedGroupMembers.includes(friend.id)
-                        ? "border-[#6264A7] bg-[#6264A7]/5"
-                        : "border-gray-100"
-                    }`}
-                  >
-                    <Avatar className={`h-10 w-10 ${friend.color}`}>
-                      <AvatarFallback className={`${friend.color} text-white`}>
-                        {friend.initials}
-                      </AvatarFallback>
-                    </Avatar>
-
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-gray-900 truncate">
-                        {friend.displayName}
-                      </h3>
-                      <p className="text-gray-500 text-xs">{friend.status}</p>
-                    </div>
-
-                    {selectedGroupMembers.includes(friend.id) && (
-                      <div className="w-5 h-5 rounded-full bg-[#6264A7] flex items-center justify-center">
-                        <svg
-                          className="w-3 h-3 text-white"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
+                friends.map((friend) => {
+                  const isSelected = selectedGroupMemberUsernames.includes(
+                    friend.username
+                  );
+                  return (
+                    <div
+                      key={friend.id}
+                      className={`flex items-center gap-3 p-2 rounded cursor-pointer border ${
+                        isSelected
+                          ? "border-[#6264A7] bg-[#F3F2FF]"
+                          : "border-transparent hover:bg-gray-50"
+                      }`}
+                      onClick={() => toggleGroupMember(friend.username)}
+                    >
+                      <Avatar className={`h-8 w-8 ${friend.color}`}>
+                        <AvatarFallback className={`${friend.color} text-white`}>
+                          {friend.initials}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
+                        <div className="text-sm text-gray-900">
+                          {friend.displayName}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {friend.status}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                ))
+                      {isSelected && (
+                        <span className="text-xs font-medium text-[#6264A7]">
+                          Selected
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
 
-            <div className="flex gap-2 pt-4">
+            <div className="flex justify-end">
               <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => {
-                  setShowGroupDialog(false);
-                  setGroupName("");
-                  setSelectedGroupMembers([]);
-                  setGroupSearchQuery("");
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                className="flex-1 bg-[#6264A7] hover:bg-[#5558A0]"
                 onClick={handleCreateGroup}
-                disabled={!groupName.trim() || selectedGroupMembers.length === 0}
+                className="bg-[#6264A7] hover:bg-[#5558A0]"
               >
-                <Users className="h-4 w-4 mr-1" />
                 Create Group
               </Button>
             </div>

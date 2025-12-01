@@ -5,13 +5,18 @@ import { Label } from "./ui/label";
 import { motion } from "motion/react";
 import { backend } from "../../constants";
 
+const ROOT_USER_KEY = "talkbox_root_user";
+
 interface LoginPageProps {
   onLogin: (username: string) => void;
   onSignUp: () => void;
 }
 
 export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
-  const [username, setUsername] = useState("");
+  // Load username from localStorage on initial render
+  const [username, setUsername] = useState(
+    () => localStorage.getItem(ROOT_USER_KEY) || ""
+  );
   const [password, setPassword] = useState("");
   const [isHovered, setIsHovered] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -29,30 +34,33 @@ export function LoginPage({ onLogin, onSignUp }: LoginPageProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          "userId": username,
-          "password": password,
+          userId: username,
+          password: password,
         }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        // adapt these keys based on your backend response
         const msg =
-          (data.detail as string) ||
-          (data.message as string) ||
+          data.detail ||
+          data.message ||
           "Login failed. Please check your credentials.";
         setError(msg);
         return;
       }
 
-      // if backend returns token/user info, you can store it here
+      // Save token if backend returns it
       if (data.token) {
         localStorage.setItem("authToken", data.token);
       }
 
-      // prefer username returned from backend if available
-      const displayName = (data.username as string) || username;
+      // Choose final display name
+      const displayName = data.username || username;
+
+      // 🔥 Save ROOT USER permanently
+      localStorage.setItem(ROOT_USER_KEY, displayName);
+
       onLogin(displayName);
     } catch (err) {
       console.error(err);
